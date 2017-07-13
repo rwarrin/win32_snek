@@ -48,41 +48,6 @@ Win32ResizeDIBSection(struct win32_screen_buffer *Buffer, uint32 Width, uint32 H
 	Buffer->BitmapMemory = (void *)VirtualAlloc(0, BitmapMemorySize, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
 }
 
-// TODO(rick): Move this into the game layer, it doesn't need to be in the
-// platform layer
-static void
-Win32ClearScreenToGrid(struct win32_screen_buffer *Buffer, v3 Background, v3 Grid, uint32 GridSize)
-{
-	uint32 BackgroundColor = ( (0xff << 24) |
-							   ((int32)Background.R << 16) |
-							   ((int32)Background.G << 8) |
-							   ((int32)Background.B << 0) );
-
-	uint32 GridColor = ( (0xff << 24) |
-						 ((int32)Grid.R << 16) |
-						 ((int32)Grid.G << 8) |
-						 ((int32)Grid.B << 0) );
-
-	uint8 *Row = (uint8 *)Buffer->BitmapMemory;
-	for(uint32 Y = 0; Y < Buffer->Height; ++Y)
-	{
-		uint32 *Pixel = (uint32 *)Row;
-		for(uint32 X = 0; X < Buffer->Width; ++X)
-		{
-			if((X % GridSize == 0) ||
-			   (Y % GridSize == 0))
-			{
-				*Pixel++ = GridColor;
-			}
-			else
-			{
-				*Pixel++ = BackgroundColor;
-			}
-		}
-		Row += Buffer->Pitch;
-	}
-}
-
 static void
 Win32DrawBufferToScreen(struct win32_screen_buffer *Buffer, HDC DeviceContext,
 						uint32 WindowWidth, uint32 WindowHeight)
@@ -93,6 +58,27 @@ Win32DrawBufferToScreen(struct win32_screen_buffer *Buffer, HDC DeviceContext,
 				  Buffer->BitmapMemory,
 				  &Buffer->BitmapInfo,
 				  DIB_RGB_COLORS, SRCCOPY);
+}
+
+static struct memory_arena
+Win32InitializeMemoryArena(uint32 Size)
+{
+	struct memory_arena Result = {};
+
+	Result.Base = (void *)VirtualAlloc(0, Size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+	Result.Used = 0;
+	Result.Size = Size;
+
+	return(Result);
+}
+
+static void
+Win32ProcessKeyboardInput(struct keyboard_input *Key, bool32 IsDown)
+{
+	if(Key->IsDown != IsDown)
+	{
+		Key->IsDown = IsDown;
+	}
 }
 
 LRESULT CALLBACK
@@ -118,13 +104,45 @@ Win32Callback(HWND Window, UINT Message, WPARAM WParam, LPARAM LParam)
 }
 
 static void
-ProcessPendingMessages()
+ProcessPendingMessages(union game_input *Input)
 {
 	MSG Message;
 	while(PeekMessage(&Message, 0, 0, 0, PM_REMOVE))
 	{
 		switch(Message.message)
 		{
+			case WM_KEYDOWN:
+			case WM_KEYUP:
+			case WM_SYSKEYDOWN:
+			case WM_SYSKEYUP:
+			{
+				uint32 VKCode = (uint32)Message.wParam;
+				bool32 WasDown = ((Message.lParam & (1 << 30)) != 0);
+				bool32 IsDown = ((Message.lParam & (1 << 31)) == 0);
+				if(WasDown != IsDown)
+				{
+					if((VKCode == 'W') ||
+					   (VKCode == VK_UP))
+					{
+						Win32ProcessKeyboardInput(&Input->KeyUp, IsDown);
+					}
+					else if((VKCode == 'A') ||
+							(VKCode == VK_LEFT))
+					{
+						Win32ProcessKeyboardInput(&Input->KeyLeft, IsDown);
+					}
+					else if((VKCode == 'S') ||
+							(VKCode == VK_DOWN))
+					{
+						Win32ProcessKeyboardInput(&Input->KeyDown, IsDown);
+					}
+					else if((VKCode == 'D') ||
+							(VKCode == VK_RIGHT))
+					{
+						Win32ProcessKeyboardInput(&Input->KeyRight, IsDown);
+					}
+				}
+			} break;
 			default:
 			{
 				TranslateMessage(&Message);
@@ -168,17 +186,29 @@ WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CmdLine, int CmdShow)
 	struct win32_window_dimensions WindowDims = Win32GetWindowDimensions(Window);
 	Win32ResizeDIBSection(&GlobalBackBuffer, WindowDims.Width, WindowDims.Height);
 
+	struct game_state GameState = {};
+	GameState.WorldArena = Win32InitializeMemoryArena(Kilobytes(50));
+	GameState.GridSize = 10;
+
 	GlobalRunning = 1;
 	while(GlobalRunning)
 	{
-		ProcessPendingMessages();
+		ProcessPendingMessages(&GameState.Input);
 
 		HDC WindowDC = GetDC(Window);
 		struct win32_window_dimensions WindowDims = Win32GetWindowDimensions(Window);
-		Win32ClearScreenToGrid(&GlobalBackBuffer, V3(31, 31, 31), V3(18, 18, 18), GAME_GRIDSIZE);
+
+		game_screen_buffer GameScreenBuffer = {};
+		GameScreenBuffer.BitmapMemory = GlobalBackBuffer.BitmapMemory;
+		GameScreenBuffer.Width = GlobalBackBuffer.Width;
+		GameScreenBuffer.Height = GlobalBackBuffer.Height;
+		GameScreenBuffer.Pitch = GlobalBackBuffer.Pitch;
+		GameScreenBuffer.BytesPerPixel = GlobalBackBuffer.BytesPerPixel;
+		GameUpdateAndRender(&GameState, &GameScreenBuffer);
+
 		Win32DrawBufferToScreen(&GlobalBackBuffer, WindowDC, WindowDims.Width, WindowDims.Height);
 
-		Sleep(1);
+		Sleep(33);
 	}
 
 	return(0);
