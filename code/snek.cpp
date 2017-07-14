@@ -82,12 +82,88 @@ PlaceFood(struct game_state *GameState, uint32 Width, uint32 Height)
 	GameState->Food.Y = rand() % Height;
 }
 
+static struct temporary_memory
+BeginTemporaryMemory(struct memory_arena *Arena)
+{
+	struct temporary_memory Result = {};
+	Result.Arena = Arena;
+	Result.Used = Arena->Used;
+	++Arena->TempRegions;
+
+	return(Result);
+}
+
+static void
+EndTemporaryMemory(struct temporary_memory TempMem)
+{
+	struct memory_arena *Arena = TempMem.Arena;
+	Assert(Arena->Used > TempMem.Used);
+	Arena->Used = TempMem.Used;
+	--Arena->TempRegions;
+}
+
+static void
+MainMenuScene(struct game_state *GameState, struct game_screen_buffer *Buffer)
+{
+	static int8 SelectedMenuItem = 0;
+	static int8 MenuItemCount = 2;
+	static v3 SelectedColor = V3(50, 255, 50);
+	static v3 MenuColor = V3(255, 200, 200);
+
+	if((GameState->Input.KeyUp.IsDown) &&
+	   (SelectedMenuItem > 0))
+	{
+		--SelectedMenuItem;
+	}
+	else if((GameState->Input.KeyDown.IsDown) &&
+			(SelectedMenuItem < MenuItemCount - 1))
+	{
+		++SelectedMenuItem;
+	}
+	else if((GameState->Input.KeyAction.IsDown))
+	{
+		if(SelectedMenuItem == 0)
+		{
+			GameState->CurrentScene = GameScene_Game;;
+		}
+	}
+
+	ClearScreenToColor(Buffer, V3(31, 31, 31));
+
+	GameState->PlatformDrawText(Buffer, "Snek",
+								Buffer->Width / 2, (Buffer->Height / 2) - 60,
+								TextAnchor_Center, MenuColor);
+
+	struct temporary_memory TextMemory = BeginTemporaryMemory(&GameState->WorldArena);
+
+	char *MenuItemText = PushArray(&GameState->WorldArena, char, 128);
+
+	_snprintf(MenuItemText, 64, "Start Game");
+	GameState->PlatformDrawText(Buffer, MenuItemText,
+								Buffer->Width / 2, (Buffer->Height / 2) - 20,
+								TextAnchor_Center,
+								(SelectedMenuItem == 0 ? SelectedColor : MenuColor));
+
+	_snprintf(MenuItemText, 64, "Quit");
+	GameState->PlatformDrawText(Buffer, MenuItemText,
+								Buffer->Width / 2, (Buffer->Height / 2),
+								TextAnchor_Center,
+								(SelectedMenuItem == 1 ? SelectedColor : MenuColor));
+
+	EndTemporaryMemory(TextMemory);
+}
+
 void
 GameUpdateAndRender(struct game_state *GameState, struct game_screen_buffer *Buffer)
 {
+	if(GameState->CurrentScene == GameScene_MainMenu)
+	{
+		MainMenuScene(GameState, Buffer);
+		return;
+	}
+
 	uint32 GridWidth = (Buffer->Width / GameState->GridSize);
 	uint32 GridHeight = (Buffer->Height / GameState->GridSize);
-
 	if(!GameState->IsInitialized)
 	{
 		GameState->IsInitialized = true;
@@ -105,7 +181,15 @@ GameUpdateAndRender(struct game_state *GameState, struct game_screen_buffer *Buf
 		PlaceFood(GameState, GridWidth, GridHeight);
 	}
 
-	if(GameState->Alive)
+	// TODO(rick): Improve this functionality so a tap doesn't rapidfire toggle
+	// paused state
+	if((GameState->Input.KeyPause.IsDown) &&
+	   (GameState->Alive))
+	{
+		GameState->GamePaused = !GameState->GamePaused;
+	}
+
+	if(GameState->Alive && !GameState->GamePaused)
 	{
 		for(uint32 SnakePartIndex = GameState->SnakeSize;
 			SnakePartIndex > 0;
@@ -143,13 +227,16 @@ GameUpdateAndRender(struct game_state *GameState, struct game_screen_buffer *Buf
 		SnakeHead->Position.X += SnakeHead->Direction.X;
 		SnakeHead->Position.Y += SnakeHead->Direction.Y;
 
+		// TODO(rick): This can probably be pulled out into a collision
+		// detection function
 		{
 			if((SnakeHead->Position.X == GameState->Food.X) &&
 			(SnakeHead->Position.Y == GameState->Food.Y))
 			{
-				PlaceFood(GameState, GridWidth, GridHeight);
 				Assert(GameState->SnakeSize + 1 < GameState->SnakeMaxSize);
 
+				GameState->Score += (20 + GameState->Score / 10);
+				PlaceFood(GameState, GridWidth, GridHeight);
 				if(GameState->SnakeSize + 1 < GameState->SnakeMaxSize)
 				{
 					++GameState->SnakeSize;
@@ -169,6 +256,16 @@ GameUpdateAndRender(struct game_state *GameState, struct game_screen_buffer *Buf
 					SnakeHead->Direction.X = 0;
 					SnakeHead->Direction.Y = 0;
 				}
+			}
+
+			if((SnakeHead->Position.X < 0) ||
+			   (SnakeHead->Position.X > GridWidth) ||
+			   (SnakeHead->Position.Y < 0) ||
+			   (SnakeHead->Position.Y > GridHeight))
+			{
+				GameState->Alive = false;
+				SnakeHead->Direction.X = 0;
+				SnakeHead->Direction.Y = 0;
 			}
 		}
 	}
@@ -194,4 +291,27 @@ GameUpdateAndRender(struct game_state *GameState, struct game_screen_buffer *Buf
 					  GameState->GridSize, GameState->GridSize, Color);
 	}
 	DrawGridOverlay(Buffer, GameState->GridSize, V3(18, 18, 18));
+
+	if(GameState->GamePaused)
+	{
+		GameState->PlatformDrawText(Buffer, "Game Paused",
+									Buffer->Width / 2, Buffer->Height / 2,
+									TextAnchor_Center, V3(255, 0, 0));
+	}
+
+	if(!GameState->Alive)
+	{
+		GameState->PlatformDrawText(Buffer, "Game Over",
+									Buffer->Width / 2, (Buffer->Height / 2) - 32,
+									TextAnchor_Center, V3(255, 0, 0));
+
+		struct temporary_memory TextMemory = BeginTemporaryMemory(&GameState->WorldArena);
+		char *ScoreText = PushArray(&GameState->WorldArena, char, 64);
+		_snprintf(ScoreText, 64, "Score: %d", GameState->Score);
+		GameState->PlatformDrawText(Buffer, ScoreText,
+									Buffer->Width / 2, Buffer->Height / 2,
+									TextAnchor_Center, V3(255, 0, 0));
+		EndTemporaryMemory(TextMemory);
+	}
+	Assert(GameState->WorldArena.TempRegions == 0);
 }

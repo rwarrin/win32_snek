@@ -82,10 +82,17 @@ struct memory_arena
 	void *Base;
 	uint32 Used;
 	uint32 Size;
+	uint32 TempRegions;
+};
+
+struct temporary_memory
+{
+	struct memory_arena *Arena;
+	uint32 Used;
 };
 
 #define PushStruct(Arena, Type) (Type *)_PushOnArena(Arena, sizeof(Type))
-#define PushArray(Arena, Type, Count) (Type *)_PushOnArena(Arena, (sizeof(Type) * (Count)))
+#define PushArray(Arena, Type, Count) (Type *)_PushOnArena(Arena, ((Count)*sizeof(Type)))
 
 void *
 _PushOnArena(struct memory_arena *Arena, uint32 Size)
@@ -93,8 +100,7 @@ _PushOnArena(struct memory_arena *Arena, uint32 Size)
 	Assert(Arena->Used + Size < Arena->Size);
 
 	void *Result = (void *)((uint8 *)Arena->Base + Arena->Used);
-	Arena->Used += Arena->Used + Size;
-	Arena->Base = (void *)((uint8 *)Arena->Base + Arena->Used);
+	Arena->Used = Arena->Used + Size;
 
 	return(Result);
 }
@@ -103,6 +109,15 @@ struct snake_part
 {
 	v2 Position;
 	v2 Direction;
+};
+
+enum text_anchor
+{
+	TextAnchor_Left = 0,
+	TextAnchor_Center,
+	TextAnchor_Right,
+
+	TextAnchor_Count,
 };
 
 struct keyboard_input
@@ -118,14 +133,27 @@ union game_input
 		struct keyboard_input KeyDown;
 		struct keyboard_input KeyLeft;
 		struct keyboard_input KeyRight;
+		struct keyboard_input KeyPause;
+		struct keyboard_input KeyAction;
 	};
-	struct keyboard_input Keys[4];
+	struct keyboard_input Keys[6];
+};
+
+enum game_scene
+{
+	GameScene_Game,
+	GameScene_MainMenu,
+
+	GameScene_Count
 };
 
 struct game_state
 {
 	bool32 IsInitialized;
+	bool32 GamePaused;
 	uint32 GridSize;
+	uint32 Score;
+	game_scene CurrentScene;
 
 	v2 Food;
 
@@ -136,6 +164,8 @@ struct game_state
 
 	struct memory_arena WorldArena;
 	union game_input Input;
+
+	void (*PlatformDrawText)(struct game_screen_buffer *, char *, int32, int32, text_anchor, v3);
 };
 
 #define SNEK_H

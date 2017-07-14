@@ -75,9 +75,73 @@ Win32InitializeMemoryArena(uint32 Size)
 static void
 Win32ProcessKeyboardInput(struct keyboard_input *Key, bool32 IsDown)
 {
-	if(Key->IsDown != IsDown)
+	//	TODO(rick): Figure this out??? it's always down
+//	if(Key->IsDown != IsDown)
 	{
 		Key->IsDown = IsDown;
+	}
+}
+
+static void
+Win32DrawText(struct game_screen_buffer *Buffer, char *Text, int32 X, int32 Y, text_anchor AnchorPoint, v3 Color)
+{
+	static HDC TextDeviceContext = 0;
+	if(!TextDeviceContext)
+	{
+		uint32 TextBitmapWidth = 512;
+		uint32 TextBitmapHeight = 32;
+
+		TextDeviceContext = CreateCompatibleDC(0);
+		HBITMAP TextBitmap = CreateCompatibleBitmap(TextDeviceContext, TextBitmapWidth, TextBitmapHeight);
+		Assert(TextBitmap != NULL);
+		SelectObject(TextDeviceContext, TextBitmap);
+	}
+
+	uint32 TextLength = strlen(Text);
+
+	SIZE TextSize = {};
+	GetTextExtentPoint32(TextDeviceContext, Text, TextLength, &TextSize);
+	
+	SetBkColor(TextDeviceContext, RGB(0, 0, 0));
+	SetTextColor(TextDeviceContext, RGB(255, 255, 255));
+	TextOut(TextDeviceContext, 0, 0, Text, TextLength);
+
+	uint32 DestColor = ( (0xff << 24) |
+						 ((int32)Color.R << 16) |
+						 ((int32)Color.G << 8) |
+						 ((int32)Color.B << 0) );
+	if(AnchorPoint == TextAnchor_Center)
+	{
+		X = X - (TextSize.cx / 2);
+		Y = Y - (TextSize.cy / 2);
+	}
+	else if(AnchorPoint == TextAnchor_Right)
+	{
+		X = X - TextSize.cx;
+	}
+
+	if(X < 0) { X = 0; }
+	if(X + TextSize.cx > Buffer->Width) { X = X - TextSize.cx; }
+	if(Y < 0) { Y = 0; }
+	if(Y + TextSize.cy > Buffer->Height) { Y = Y - TextSize.cy; }
+
+	uint8 *Base = (uint8 *)Buffer->BitmapMemory;
+	for(uint32 SrcY = 0;
+		SrcY < TextSize.cy;
+		++SrcY)
+	{
+		uint32 *Pixel = (uint32 *)(Base + ((Y + SrcY) * Buffer->Pitch) + (X * Buffer->BytesPerPixel));
+		for(uint32 SrcX = 0;
+			SrcX < TextSize.cx;
+			++SrcX)
+		{
+			COLORREF SourcePixel = GetPixel(TextDeviceContext, SrcX, SrcY);
+			if(SourcePixel != 0)
+			{
+				*Pixel = DestColor;
+			}
+			++Pixel;
+		}
 	}
 }
 
@@ -141,6 +205,15 @@ ProcessPendingMessages(union game_input *Input)
 					{
 						Win32ProcessKeyboardInput(&Input->KeyRight, IsDown);
 					}
+
+					if(VKCode == VK_SPACE)
+					{
+						Win32ProcessKeyboardInput(&Input->KeyPause, IsDown);
+					}
+					if(VKCode == VK_RETURN)
+					{
+						Win32ProcessKeyboardInput(&Input->KeyAction, IsDown);
+					}
 				}
 			} break;
 			default:
@@ -187,8 +260,10 @@ WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CmdLine, int CmdShow)
 	Win32ResizeDIBSection(&GlobalBackBuffer, WindowDims.Width, WindowDims.Height);
 
 	struct game_state GameState = {};
-	GameState.WorldArena = Win32InitializeMemoryArena(Kilobytes(50));
+	GameState.WorldArena = Win32InitializeMemoryArena(Kilobytes(70));
 	GameState.GridSize = 10;
+	GameState.PlatformDrawText = Win32DrawText;
+	GameState.CurrentScene = GameScene_MainMenu;
 
 	GlobalRunning = 1;
 	while(GlobalRunning)
