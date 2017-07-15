@@ -151,9 +151,15 @@ struct game_state
 {
 	bool32 IsInitialized;
 	bool32 GamePaused;
+	bool32 GameRunning;
 	uint32 GridSize;
 	uint32 Score;
 	game_scene CurrentScene;
+
+	real32 dtForFrame;
+	real32 TicksPerSecond;
+	real32 TargetSecondsPerTick;
+	real32 SecondsSinceLastTick;
 
 	v2 Food;
 

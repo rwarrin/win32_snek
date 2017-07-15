@@ -7,7 +7,7 @@
 
 #include "win32_snek.h"
 
-static bool32 GlobalRunning;
+static bool32 *GlobalRunning;
 static win32_screen_buffer GlobalBackBuffer;
 
 static win32_window_dimensions
@@ -145,6 +145,26 @@ Win32DrawText(struct game_screen_buffer *Buffer, char *Text, int32 X, int32 Y, t
 	}
 }
 
+inline static LARGE_INTEGER
+Win32GetWallClock(void)
+{
+	LARGE_INTEGER Result = {};
+	QueryPerformanceCounter(&Result);
+	return(Result);
+}
+
+inline static real32
+Win32GetSecondsElapsed(LARGE_INTEGER Start, LARGE_INTEGER End)
+{
+	LARGE_INTEGER CPUFrequency = {};
+	QueryPerformanceFrequency(&CPUFrequency);
+
+	real32 Result = ((real32)(End.QuadPart - Start.QuadPart) /
+					 (real32)CPUFrequency.QuadPart);
+	
+	return(Result);
+}
+
 LRESULT CALLBACK
 Win32Callback(HWND Window, UINT Message, WPARAM WParam, LPARAM LParam)
 {
@@ -155,7 +175,7 @@ Win32Callback(HWND Window, UINT Message, WPARAM WParam, LPARAM LParam)
 		case WM_QUIT:
 		case WM_DESTROY:
 		{
-			GlobalRunning = 0;
+			*GlobalRunning = 0;
 			PostQuitMessage(0);
 		} break;
 		default:
@@ -190,20 +210,25 @@ ProcessPendingMessages(union game_input *Input)
 					{
 						Win32ProcessKeyboardInput(&Input->KeyUp, IsDown);
 					}
-					else if((VKCode == 'A') ||
+					if((VKCode == 'A') ||
 							(VKCode == VK_LEFT))
 					{
 						Win32ProcessKeyboardInput(&Input->KeyLeft, IsDown);
 					}
-					else if((VKCode == 'S') ||
+					if((VKCode == 'S') ||
 							(VKCode == VK_DOWN))
 					{
 						Win32ProcessKeyboardInput(&Input->KeyDown, IsDown);
 					}
-					else if((VKCode == 'D') ||
+					if((VKCode == 'D') ||
 							(VKCode == VK_RIGHT))
 					{
 						Win32ProcessKeyboardInput(&Input->KeyRight, IsDown);
+					}
+
+					if(VKCode == 'B')
+					{
+						*GlobalRunning = false;
 					}
 
 					if(VKCode == VK_SPACE)
@@ -256,6 +281,9 @@ WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CmdLine, int CmdShow)
 		return(-2);
 	}
 
+	real32 TargetFPS = 60.0f;
+	real32 TargetSecondsPerFrame = 1.0f / TargetFPS;
+
 	struct win32_window_dimensions WindowDims = Win32GetWindowDimensions(Window);
 	Win32ResizeDIBSection(&GlobalBackBuffer, WindowDims.Width, WindowDims.Height);
 
@@ -264,10 +292,14 @@ WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CmdLine, int CmdShow)
 	GameState.GridSize = 10;
 	GameState.PlatformDrawText = Win32DrawText;
 	GameState.CurrentScene = GameScene_MainMenu;
+	GameState.dtForFrame = TargetSecondsPerFrame;
+	GameState.GameRunning = true;
 
-	GlobalRunning = 1;
-	while(GlobalRunning)
+	GlobalRunning = &GameState.GameRunning;
+	while(GameState.GameRunning)
 	{
+		LARGE_INTEGER Start = Win32GetWallClock();
+
 		ProcessPendingMessages(&GameState.Input);
 
 		HDC WindowDC = GetDC(Window);
@@ -283,7 +315,31 @@ WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR CmdLine, int CmdShow)
 
 		Win32DrawBufferToScreen(&GlobalBackBuffer, WindowDC, WindowDims.Width, WindowDims.Height);
 
-		Sleep(33);
+		LARGE_INTEGER End = Win32GetWallClock();
+		real32 SecondsElapsedForFrame = Win32GetSecondsElapsed(Start, End);
+
+		if(SecondsElapsedForFrame < TargetSecondsPerFrame)
+		{
+			real32 MSToSleep = (real32)((real32)(TargetSecondsPerFrame * 1000) -
+											  (real32)(SecondsElapsedForFrame * 1000));
+
+			if(MSToSleep > 0.0f)
+			{
+				Sleep(MSToSleep);
+			}
+
+#if 0
+			// NOTE(rick): Debug output to measure FPS
+			LARGE_INTEGER End = Win32GetWallClock();
+			real32 SecondsElapsedForFrame = Win32GetSecondsElapsed(Start, End);
+			real32 ActualFPS = 1.0f / SecondsElapsedForFrame;
+			char FPSBuffer[64] = {};
+			_snprintf(FPSBuffer, 32, "%.02fms/f | %.02ff/s\n", SecondsElapsedForFrame, ActualFPS);
+			OutputDebugStringA(FPSBuffer);
+#endif
+		}
+
+
 	}
 
 	return(0);

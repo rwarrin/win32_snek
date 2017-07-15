@@ -124,7 +124,11 @@ MainMenuScene(struct game_state *GameState, struct game_screen_buffer *Buffer)
 	{
 		if(SelectedMenuItem == 0)
 		{
-			GameState->CurrentScene = GameScene_Game;;
+			GameState->CurrentScene = GameScene_Game;
+		}
+		else if(SelectedMenuItem == 1)
+		{
+			GameState->GameRunning = false;
 		}
 	}
 
@@ -156,19 +160,20 @@ MainMenuScene(struct game_state *GameState, struct game_screen_buffer *Buffer)
 void
 GameUpdateAndRender(struct game_state *GameState, struct game_screen_buffer *Buffer)
 {
-	if(GameState->CurrentScene == GameScene_MainMenu)
-	{
-		MainMenuScene(GameState, Buffer);
-		return;
-	}
-
 	uint32 GridWidth = (Buffer->Width / GameState->GridSize);
 	uint32 GridHeight = (Buffer->Height / GameState->GridSize);
 	if(!GameState->IsInitialized)
 	{
 		GameState->IsInitialized = true;
-		//srand(time(0));
-		srand(5);
+		GameState->SnakeSize = 0;
+		GameState->Score = 0;
+		GameState->Input = {};
+		GameState->WorldArena.Used = 0;
+		GameState->TicksPerSecond = 16;
+		GameState->TargetSecondsPerTick = 1.0f / GameState->TicksPerSecond;
+		GameState->SecondsSinceLastTick = 0.0f;
+
+		srand(time(0));
 
 		GameState->SnakeMaxSize = GridWidth * GridHeight;
 		GameState->Snake = PushArray(&GameState->WorldArena, struct snake_part, GameState->SnakeMaxSize);
@@ -181,91 +186,102 @@ GameUpdateAndRender(struct game_state *GameState, struct game_screen_buffer *Buf
 		PlaceFood(GameState, GridWidth, GridHeight);
 	}
 
-	// TODO(rick): Improve this functionality so a tap doesn't rapidfire toggle
-	// paused state
-	if((GameState->Input.KeyPause.IsDown) &&
-	   (GameState->Alive))
+	GameState->SecondsSinceLastTick += GameState->dtForFrame;
+	if(GameState->SecondsSinceLastTick >= GameState->TargetSecondsPerTick)
 	{
-		GameState->GamePaused = !GameState->GamePaused;
-	}
+		if(GameState->CurrentScene == GameScene_MainMenu)
+		{
+			MainMenuScene(GameState, Buffer);
+			return;
+		}
+		GameState->SecondsSinceLastTick = 0.0f;
 
-	if(GameState->Alive && !GameState->GamePaused)
-	{
-		for(uint32 SnakePartIndex = GameState->SnakeSize;
-			SnakePartIndex > 0;
-			--SnakePartIndex)
+		// TODO(rick): Improve this functionality so a tap doesn't rapidfire toggle
+		// paused state
+		if((GameState->Input.KeyPause.IsDown) &&
+		   (GameState->Alive))
 		{
-			(GameState->Snake + SnakePartIndex)->Position = (GameState->Snake + (SnakePartIndex - 1))->Position;
-		}
-
-		struct snake_part *SnakeHead = GameState->Snake;
-		if((GameState->Input.KeyUp.IsDown) &&
-		(SnakeHead->Direction.Y != 1))
-		{
-			SnakeHead->Direction.X = 0;
-			SnakeHead->Direction.Y = -1;
-		}
-		else if((GameState->Input.KeyDown.IsDown) &&
-				(SnakeHead->Direction.Y != -1))
-		{
-			SnakeHead->Direction.X = 0;
-			SnakeHead->Direction.Y = 1;
-		}
-		else if((GameState->Input.KeyLeft.IsDown) &&
-				(SnakeHead->Direction.X != 1))
-		{
-			SnakeHead->Direction.X = -1;
-			SnakeHead->Direction.Y = 0;
-		}
-		else if((GameState->Input.KeyRight.IsDown) &&
-				(SnakeHead->Direction.X != -1))
-		{
-			SnakeHead->Direction.X = 1;
-			SnakeHead->Direction.Y = 0;
+			GameState->GamePaused = !GameState->GamePaused;
 		}
 
-		SnakeHead->Position.X += SnakeHead->Direction.X;
-		SnakeHead->Position.Y += SnakeHead->Direction.Y;
-
-		// TODO(rick): This can probably be pulled out into a collision
-		// detection function
+		if(GameState->Alive && !GameState->GamePaused)
 		{
-			if((SnakeHead->Position.X == GameState->Food.X) &&
-			(SnakeHead->Position.Y == GameState->Food.Y))
+			for(uint32 SnakePartIndex = GameState->SnakeSize;
+				SnakePartIndex > 0;
+				--SnakePartIndex)
 			{
-				Assert(GameState->SnakeSize + 1 < GameState->SnakeMaxSize);
-
-				GameState->Score += (20 + GameState->Score / 10);
-				PlaceFood(GameState, GridWidth, GridHeight);
-				if(GameState->SnakeSize + 1 < GameState->SnakeMaxSize)
-				{
-					++GameState->SnakeSize;
-				}
+				(GameState->Snake + SnakePartIndex)->Position = (GameState->Snake + (SnakePartIndex - 1))->Position;
 			}
 
-			for(uint32 SnakePartIndex = 1;
-				SnakePartIndex < GameState->SnakeSize;
-				++SnakePartIndex)
+			struct snake_part *SnakeHead = GameState->Snake;
+			if((GameState->Input.KeyUp.IsDown) &&
+			   (SnakeHead->Direction.Y != 1))
 			{
-				struct snake_part *BodySegment = GameState->Snake + SnakePartIndex;
-				if((SnakeHead->Position.X == BodySegment->Position.X) &&
-				(SnakeHead->Position.Y == BodySegment->Position.Y))
+				SnakeHead->Direction.X = 0;
+				SnakeHead->Direction.Y = -1;
+			}
+			else if((GameState->Input.KeyDown.IsDown) &&
+					(SnakeHead->Direction.Y != -1))
+			{
+				SnakeHead->Direction.X = 0;
+				SnakeHead->Direction.Y = 1;
+			}
+			else if((GameState->Input.KeyLeft.IsDown) &&
+					(SnakeHead->Direction.X != 1))
+			{
+				SnakeHead->Direction.X = -1;
+				SnakeHead->Direction.Y = 0;
+			}
+			else if((GameState->Input.KeyRight.IsDown) &&
+					(SnakeHead->Direction.X != -1))
+			{
+				SnakeHead->Direction.X = 1;
+				SnakeHead->Direction.Y = 0;
+			}
+
+			SnakeHead->Position.X += SnakeHead->Direction.X;
+			SnakeHead->Position.Y += SnakeHead->Direction.Y;
+
+			// TODO(rick): This can probably be pulled out into a collision
+			// detection function
+			{
+				if((SnakeHead->Position.X == GameState->Food.X) &&
+				   (SnakeHead->Position.Y == GameState->Food.Y))
 				{
-					// TODO(rick): End game here
+					Assert(GameState->SnakeSize + 1 < GameState->SnakeMaxSize);
+
+					GameState->Score += (20 + GameState->Score / 10);
+					PlaceFood(GameState, GridWidth, GridHeight);
+					if(GameState->SnakeSize + 1 < GameState->SnakeMaxSize)
+					{
+						++GameState->SnakeSize;
+					}
+				}
+
+				for(uint32 SnakePartIndex = 1;
+					SnakePartIndex < GameState->SnakeSize;
+					++SnakePartIndex)
+				{
+					struct snake_part *BodySegment = GameState->Snake + SnakePartIndex;
+					if((SnakeHead->Position.X == BodySegment->Position.X) &&
+					   (SnakeHead->Position.Y == BodySegment->Position.Y))
+					{
+						// TODO(rick): End game here
+						GameState->Alive = false;
+						SnakeHead->Direction.X = 0;
+						SnakeHead->Direction.Y = 0;
+					}
+				}
+
+				if((SnakeHead->Position.X < 0) ||
+				   (SnakeHead->Position.X > GridWidth - 1) ||
+				   (SnakeHead->Position.Y < 0) ||
+				   (SnakeHead->Position.Y > GridHeight - 1))
+				{
 					GameState->Alive = false;
 					SnakeHead->Direction.X = 0;
 					SnakeHead->Direction.Y = 0;
 				}
-			}
-
-			if((SnakeHead->Position.X < 0) ||
-			   (SnakeHead->Position.X > GridWidth) ||
-			   (SnakeHead->Position.Y < 0) ||
-			   (SnakeHead->Position.Y > GridHeight))
-			{
-				GameState->Alive = false;
-				SnakeHead->Direction.X = 0;
-				SnakeHead->Direction.Y = 0;
 			}
 		}
 	}
@@ -301,6 +317,13 @@ GameUpdateAndRender(struct game_state *GameState, struct game_screen_buffer *Buf
 
 	if(!GameState->Alive)
 	{
+		if(GameState->Input.KeyAction.IsDown)
+		{
+			GameState->IsInitialized = false;
+			GameState->CurrentScene = GameScene_MainMenu;
+			return;
+		}
+
 		GameState->PlatformDrawText(Buffer, "Game Over",
 									Buffer->Width / 2, (Buffer->Height / 2) - 32,
 									TextAnchor_Center, V3(255, 0, 0));
@@ -312,6 +335,10 @@ GameUpdateAndRender(struct game_state *GameState, struct game_screen_buffer *Buf
 									Buffer->Width / 2, Buffer->Height / 2,
 									TextAnchor_Center, V3(255, 0, 0));
 		EndTemporaryMemory(TextMemory);
+
+		GameState->PlatformDrawText(Buffer, "Press ENTER to Restart",
+									Buffer->Width / 2, (Buffer->Height / 2) + 32,
+									TextAnchor_Center, V3(255, 0, 0));
 	}
 	Assert(GameState->WorldArena.TempRegions == 0);
 }
