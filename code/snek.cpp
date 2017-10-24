@@ -108,7 +108,7 @@ MainMenuScene(struct game_state *GameState, struct game_screen_buffer *Buffer)
 	static int8 SelectedMenuItem = 0;
 	static int8 MenuItemCount = 2;
 	static v3 SelectedColor = V3(50, 255, 50);
-	static v3 MenuColor = V3(255, 200, 200);
+	static v3 MenuColor = V3(255, 0, 0);
 
 	if((GameState->Input.KeyUp.IsDown) &&
 	   (SelectedMenuItem > 0))
