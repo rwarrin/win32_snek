@@ -188,6 +188,7 @@ Win32Callback(HWND Window, UINT Message, WPARAM WParam, LPARAM LParam)
 	return(Result);
 }
 
+// Processes windows messages
 static void
 ProcessPendingMessages(union game_input *Input)
 {
