@@ -162,6 +162,7 @@ struct game_state
 	real32 SecondsSinceLastTick;
 
 	v2 Food;
+	char *SnakeName;
 
 	struct snake_part *Snake;
 	uint32 SnakeMaxSize;
